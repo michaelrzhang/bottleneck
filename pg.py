@@ -12,8 +12,8 @@ from frozen import FrozenSimpleEnv
 
 # hyperparameters
 
-batch_size = 50 # every how many episodes to do a param update?
-learning_rate = 1e-2
+batch_size = 100 # every how many episodes to do a param update?
+learning_rate = 1e-3
 gamma = 0.95 # discount factor for reward
 decay_rate = 0.99 # decay factor for RMSProp leaky sum of grad^2
 resume = False # resume from previous checkpoint?
@@ -29,13 +29,16 @@ num_actions = 2 # out dimension
 D = 1 # input layer dimension
 H = 5 # number of hidden layer neurons
 
+compute_entropy = True
+
 if resume:
     model = pickle.load(open('save.p', 'rb'))
 else:
     model = {}
     model['W1'] = np.random.randn(H,D) / np.sqrt(D) # "Xavier" initialization
-    model['B1'] = np.ones((H, 1)) * 0.1 # "Xavier" initialization
+    model['B1'] = np.ones((H, 1)) * 0.1 
     model['W2'] = np.random.randn(num_actions, H) / np.sqrt(H)
+    model['B2'] = np.ones((num_actions, 1)) * 0.1 
     
 grad_buffer = { k : np.zeros_like(v) for k,v in model.items() } # update buffers that add up gradients over a batch
 rmsprop_cache = { k : np.zeros_like(v) for k,v in model.items() } # rmsprop memory
@@ -57,7 +60,7 @@ def policy_forward(x):
     # pdb.set_trace()
     h = np.dot(model['W1'], x) + model['B1']
     h = sigmoid(h) 
-    logp = np.dot(model['W2'], h)
+    logp = np.dot(model['W2'], h) + model['B2']
     p = softmax_forward(logp)
     return p, h # return probability of taking action 2, and hidden state
 
@@ -66,18 +69,24 @@ def policy_backward(eph, epdlogp):
     # pdb.set_trace()
 
     dW2 = np.dot(eph.T, epdlogp)
-    pdb.set_trace()
+    # pdb.set_trace()
+    dB2 = np.mean(epdlogp, axis = 0)
     dh = np.dot(epdlogp, model['W2'])
     dh = eph * (1 - eph) * dh 
     
     dB1 = np.mean(dh, axis = 0)
     dW1 = np.dot(dh.T, epx)
-    return {'W1':dW1, 'W2':dW2.T, 'B1': dB1.reshape(5,1)}
+    return {'W1':dW1, 'W2':dW2.T, 'B1': dB1.reshape(len(dB1),1), 'B2': dB2.reshape(len(dB2),1)}
 
 # env = gym.make("Pong-v0")
 observation = env.reset()
 prev_x = None # used in computing the difference frame
 xs,hs,dlogps,drs = [],[],[],[]
+
+if compute_entropy:
+    all_x = []
+    all_h = []
+
 running_reward = None
 reward_sum = 0
 episode_number = 0
@@ -89,9 +98,7 @@ while True:
 
     # forward the policy network and sample an action from the returned probability
     x = observation
-    # pdb.set_trace()
     aprob, h = policy_forward(x)
-    # pdb.set_trace()
     h = h.reshape(1, H) # makes shapes align
     aprob = aprob.reshape(num_actions)
     # action = 2 if np.random.uniform() < aprob else 3 # roll the dice!
@@ -102,6 +109,9 @@ while True:
     # record various intermediates (needed later for backprop)
     xs.append(x) # observation
     hs.append(h) # hidden state
+    if compute_entropy:
+        all_h.append(h.flatten())
+        all_x.append(x)
     dlogps.append(label - aprob) # grad that encourages the action that was taken to be taken (see http://cs231n.github.io/neural-networks-2/#losses if confused)
 
     # step the environment and get new measurements
@@ -140,7 +150,6 @@ while True:
 
         epdlogp *= discounted_epr # modulate the gradient with advantage (PG magic happens right here.)
         grad = policy_backward(eph, epdlogp)
-        # pdb.set_trace()
         for k in model: grad_buffer[k] += grad[k] # accumulate grad over batch
 
         # gradient update
@@ -149,6 +158,13 @@ while True:
                 # Vanilla Gradient
                 g = grad_buffer[k] # gradient
                 model[k] += learning_rate * g
+                print(episode_number)
+                all_h = np.array(all_h)
+                all_x = np.array(all_x)
+                import pdb; pdb.set_trace()
+                print("Computing entropy with {} samples".format(len(all_x)))
+                all_h = []
+                all_x = []
                 # # RMSprop
                 # rmsprop_cache[k] = decay_rate * rmsprop_cache[k] + (1 - decay_rate) * g**2
                 # model[k] += learning_rate * g / (np.sqrt(rmsprop_cache[k]) + 1e-5)
