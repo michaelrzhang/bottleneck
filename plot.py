@@ -17,11 +17,13 @@ def plot_mis(data, reward_data = None):
 		second_x = np.mean(data[:, 3:6], axis =1)
 		entropies = np.mean(data[:, 6:9], axis = 1)
 		all_x = np.mean(data[:, 9:12], axis = 1)
+		ent_x = data[:, 12]
 		axes[0].plot(range(num_mi), first_x, c = "red", label="irrelevant I(X1;T)")
 		axes[0].plot(range(num_mi), second_x, c = "blue", label = "direction I(X2;T) = I(Y;T)")
-		axes[0].plot(range(num_mi), entropies, c = "green", label= "entropy H(T)")
-		axes[0].plot(range(num_mi), entropies, c = "orange", label= "I(X;T)")
-		axes[0].set_ylim((0, 3))
+		axes[0].plot(range(num_mi), entropies, c = "green", label= "entropy H(T) = I(X;T)")
+		# axes[0].plot(range(num_mi), entropies, c = "orange", label= "I(X;T)") # same as above!
+		axes[0].plot(range(num_mi), ent_x, c = "orange", label= "entropy H(X)")
+		axes[0].set_ylim((0, 3.5))
 		axes[0].legend()
 
 
@@ -30,6 +32,7 @@ def plot_mis(data, reward_data = None):
 		axes[1].set_xlabel("Hundreds of episodes")
 		reward_data = np.array(reward_data)
 		axes[1].plot(reward_data[:,0] // 100., reward_data[:,1])
+		axes[1].plot((0, 800), (0.928, 0.928), 'r--')
 		f.savefig("data/plot")
 	else:
 		for i in range(hidden_units):

@@ -23,6 +23,7 @@ decay_rate = 0.99 # decay factor for RMSProp leaky sum of grad^2
 resume = False # resume from previous checkpoint?
 render = False
 max_episodes = 8e4
+np.random.seed(2)
 
 # env = gym.make('FrozenLake-v0')
 # num_actions = 4 # out dim
@@ -126,6 +127,7 @@ def compute_mi_x(x, h, bins = 20):
     # pdb.set_trace()
     MIs.extend(entropy[:3])
     MIs.extend(mi_xys[:3])
+    MIs.append(est_entro_JVHW(uu)[0])
     return MIs # last three terms are entropy
 
 observation = env.reset()
