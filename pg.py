@@ -22,12 +22,13 @@ gamma = 0.95 # discount factor for reward
 decay_rate = 0.99 # decay factor for RMSProp leaky sum of grad^2
 resume = False # resume from previous checkpoint?
 render = False
-max_episodes = 5e4
+max_episodes = 8e4
 
 # env = gym.make('FrozenLake-v0')
 # num_actions = 4 # out dim
 remove_bad_episodes = False
 bad_episodes_removed = 0.5
+num_bins = 10
 
 # env_type = "simple"
 env_type = "direction"
@@ -102,17 +103,30 @@ def compute_mi_x(x, h, bins = 20):
     bins = [i * 1.0 / bins for i in range(bins + 1)]
     # iterate over hidden units
     MIs = []
+    entropy = []
+    mi_xys = []
     # pdb.set_trace()
+    # first i is basically same as Y, second is useless I(x;T) shoudl go down
+    uu = x[:, 1] * 5 + x[:, 0]
+
     for i in range(x.shape[1]):
         for j in range(h.shape[1]):
             y = np.digitize(h[:, j], bins)
             x_var = x[:, i]
             mi = est_MI_JVHW(x_var, y)
+            mi_xy = est_MI_JVHW(uu, y)[0]
+            entro = est_entro_JVHW(y)[0]
+            entropy.append(entro)
+            mi_xys.append(mi_xy)
 
             # entro = est_entro_JVHW(y) # y should be a function of x, hence..
             # assert (entro[0] - mi[0]) < 1e-4
             MIs.append(mi[0])
-    return MIs
+
+    # pdb.set_trace()
+    MIs.extend(entropy[:3])
+    MIs.extend(mi_xys[:3])
+    return MIs # last three terms are entropy
 
 observation = env.reset()
 prev_x = None # used in computing the difference frame
@@ -205,7 +219,7 @@ while episode_number < max_episodes:
                 all_h = np.array(all_h)
                 all_x = np.array(all_x)
                 print("Computing mutual information with {} samples.. ".format(len(all_x)))
-                MIs = compute_mi_x(h=all_h, x=all_x, bins =5)
+                MIs = compute_mi_x(h=all_h, x=all_x, bins =num_bins)
                 all_MIs.append(MIs)
                 print(MIs)
                 all_h = []

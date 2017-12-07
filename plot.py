@@ -15,8 +15,14 @@ def plot_mis(data, reward_data = None):
 
 		first_x = np.mean(data[:, :3], axis =1)
 		second_x = np.mean(data[:, 3:6], axis =1)
-		axes[0].plot(range(num_mi), first_x, c = "red")
-		axes[0].plot(range(num_mi), second_x, c = "blue")
+		entropies = np.mean(data[:, 6:9], axis = 1)
+		all_x = np.mean(data[:, 9:12], axis = 1)
+		axes[0].plot(range(num_mi), first_x, c = "red", label="irrelevant I(X1;T)")
+		axes[0].plot(range(num_mi), second_x, c = "blue", label = "direction I(X2;T) = I(Y;T)")
+		axes[0].plot(range(num_mi), entropies, c = "green", label= "entropy H(T)")
+		axes[0].plot(range(num_mi), entropies, c = "orange", label= "I(X;T)")
+		axes[0].set_ylim((0, 3))
+		axes[0].legend()
 
 
 
