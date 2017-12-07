@@ -1,15 +1,19 @@
-""" Trains an agent with (stochastic) Policy Gradients on Pong. Uses OpenAI Gym. """
+""" Trains an agent with (stochastic) Policy Gradients. Uses OpenAI Gym. """
 import numpy as np
 import pickle
 import gym
 import pdb
 from layers import *
 from frozen import FrozenSimpleEnv
+from entropy_estimators.est_MI import est_MI_JVHW
+from entropy_estimators.est_entro import est_entro_JVHW
+import matplotlib.pyplot as plt
 
 #TODOs: 
 # add bias?
 # abstract away backprop math/ make sure backprop is correct
-
+# reduce batch size?
+# different slipperiness on report
 # hyperparameters
 
 batch_size = 100 # every how many episodes to do a param update?
@@ -18,17 +22,29 @@ gamma = 0.95 # discount factor for reward
 decay_rate = 0.99 # decay factor for RMSProp leaky sum of grad^2
 resume = False # resume from previous checkpoint?
 render = False
+max_episodes = 5e4
 
 # env = gym.make('FrozenLake-v0')
 # num_actions = 4 # out dim
 remove_bad_episodes = False
 bad_episodes_removed = 0.5
 
-env = FrozenSimpleEnv(randomness=0.75)
-num_actions = 2 # out dimension
-D = 1 # input layer dimension
-H = 5 # number of hidden layer neurons
+# env_type = "simple"
+env_type = "direction"
+if env_type == "simple":
+    env = FrozenSimpleEnv(randomness=0.75)
+    num_actions = 2 # out dimension
+    D = 1 # input layer dimension
+    H = 3 # number of hidden layer neurons
+elif env_type == "direction":
+    env = FrozenSimpleEnv(randomness=0.75, constant_direction = False)
+    num_actions = 2
+    D = 2
+    H = 3
+else:
+    print("not supported!")
 
+log_freq = 5 # prints out information every log_freq batches
 compute_entropy = True
 
 if resume:
@@ -36,9 +52,9 @@ if resume:
 else:
     model = {}
     model['W1'] = np.random.randn(H,D) / np.sqrt(D) # "Xavier" initialization
-    model['B1'] = np.ones((H, 1)) * 0.1 
+    model['B1'] = np.zeros((H, 1)) * 0.1 
     model['W2'] = np.random.randn(num_actions, H) / np.sqrt(H)
-    model['B2'] = np.ones((num_actions, 1)) * 0.1 
+    model['B2'] = np.zeros((num_actions, 1)) * 0.1 
     
 grad_buffer = { k : np.zeros_like(v) for k,v in model.items() } # update buffers that add up gradients over a batch
 rmsprop_cache = { k : np.zeros_like(v) for k,v in model.items() } # rmsprop memory
@@ -58,9 +74,10 @@ def discount_rewards(r):
 
 def policy_forward(x):
     # pdb.set_trace()
-    h = np.dot(model['W1'], x) + model['B1']
+    h = np.dot(model['W1'], x) + model['B1'].flatten()
     h = sigmoid(h) 
-    logp = np.dot(model['W2'], h) + model['B2']
+    # pdb.set_trace()
+    logp = np.dot(model['W2'], h) + model['B2'].flatten()
     p = softmax_forward(logp)
     return p, h # return probability of taking action 2, and hidden state
 
@@ -78,7 +95,25 @@ def policy_backward(eph, epdlogp):
     dW1 = np.dot(dh.T, epx)
     return {'W1':dW1, 'W2':dW2.T, 'B1': dB1.reshape(len(dB1),1), 'B2': dB2.reshape(len(dB2),1)}
 
-# env = gym.make("Pong-v0")
+def compute_mi_x(x, h, bins = 20):
+    """
+    takes as input x and h
+    """
+    bins = [i * 1.0 / bins for i in range(bins + 1)]
+    # iterate over hidden units
+    MIs = []
+    # pdb.set_trace()
+    for i in range(x.shape[1]):
+        for j in range(h.shape[1]):
+            y = np.digitize(h[:, j], bins)
+            x_var = x[:, i]
+            mi = est_MI_JVHW(x_var, y)
+
+            # entro = est_entro_JVHW(y) # y should be a function of x, hence..
+            # assert (entro[0] - mi[0]) < 1e-4
+            MIs.append(mi[0])
+    return MIs
+
 observation = env.reset()
 prev_x = None # used in computing the difference frame
 xs,hs,dlogps,drs = [],[],[],[]
@@ -86,6 +121,8 @@ xs,hs,dlogps,drs = [],[],[],[]
 if compute_entropy:
     all_x = []
     all_h = []
+    all_MIs = []
+all_reward_sums = []
 
 running_reward = None
 reward_sum = 0
@@ -93,11 +130,12 @@ episode_number = 0
 total_trials = 0
 successful_trials = 0
 
-while True:
+while episode_number < max_episodes:
     if render: env.render()
 
     # forward the policy network and sample an action from the returned probability
     x = observation
+    # import ipdb; ipdb.set_trace()
     aprob, h = policy_forward(x)
     h = h.reshape(1, H) # makes shapes align
     aprob = aprob.reshape(num_actions)
@@ -159,26 +197,36 @@ while True:
                 g = grad_buffer[k] # gradient
                 model[k] += learning_rate * g
                 print(episode_number)
-                all_h = np.array(all_h)
-                all_x = np.array(all_x)
-                import pdb; pdb.set_trace()
-                print("Computing entropy with {} samples".format(len(all_x)))
-                all_h = []
-                all_x = []
                 # # RMSprop
                 # rmsprop_cache[k] = decay_rate * rmsprop_cache[k] + (1 - decay_rate) * g**2
                 # model[k] += learning_rate * g / (np.sqrt(rmsprop_cache[k]) + 1e-5)
                 # grad_buffer[k] = np.zeros_like(v) # reset batch gradient buffer
+            if compute_entropy:
+                all_h = np.array(all_h)
+                all_x = np.array(all_x)
+                print("Computing mutual information with {} samples.. ".format(len(all_x)))
+                MIs = compute_mi_x(h=all_h, x=all_x, bins =5)
+                all_MIs.append(MIs)
+                print(MIs)
+                all_h = []
+                all_x = []
        
         # log
-        if episode_number % (batch_size * 20) == 0: 
+        if episode_number % (batch_size * log_freq) == 0: 
             pickle.dump(model, open('data/lastest_model.p', 'wb'))
             rate = successful_trials * 1.0 / total_trials
-            print("episodes: {} success_rate: {}".format(episode_number, reward_sum / (batch_size * 20)))
+            print("episodes: {} avg_reward: {}".format(episode_number, reward_sum / (batch_size * log_freq)))
+            all_reward_sums.append((episode_number, reward_sum / (batch_size * log_freq)))
+            
             reward_sum = 0
             total_trials = 0
-            # if rate > 0.7:
-            #     break
+            
+
+ 
 
         # reward_sum = 0
         observation = env.reset() # reset env
+if compute_entropy:
+    all_MIs = np.array(all_MIs)
+    pickle.dump(all_MIs, open('data/{}latest_mi.p'.format(env_type), "wb"))
+    pickle.dump(all_reward_sums, open('data/{}reward_sums.p'.format(env_type), "wb"))
